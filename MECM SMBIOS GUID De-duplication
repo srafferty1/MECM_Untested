@@ -1,0 +1,130 @@
+# ============================================================
+# MECM SMBIOS GUID De-duplication (Hardened / Fault-Proof)
+# ============================================================
+
+#region CONFIG
+$SiteCode           = "XYZ"        # <-- REQUIRED
+$DryRun             = $true        # MUST be manually set to $false to delete
+$MinAgeDays         = 7             # Device must be inactive for at least this long
+$IgnoreRecentHours  = 4             # Ignore duplicates newer than this (race protection)
+$LogPath            = "C:\Logs"
+#endregion CONFIG
+
+#region SAFETY CHECKS
+if (-not (Test-Path $ENV:SMS_ADMIN_UI_PATH)) {
+    Write-Error "ConfigMgr console not installed. Exiting safely."
+    return
+}
+
+try {
+    Import-Module "$($ENV:SMS_ADMIN_UI_PATH)\..\ConfigurationManager.psd1" -ErrorAction Stop
+    Set-Location "$SiteCode`:" -ErrorAction Stop
+}
+catch {
+    Write-Error "Failed to load ConfigMgr module or connect to site. Exiting safely."
+    return
+}
+
+if (-not (Test-Path $LogPath)) {
+    New-Item -ItemType Directory -Path $LogPath -Force | Out-Null
+}
+
+$TimeStamp = Get-Date -Format "yyyyMMdd-HHmmss"
+$LogFile   = Join-Path $LogPath "MECM-SMBIOS-Dedupe-$TimeStamp.log"
+$CsvFile   = Join-Path $LogPath "MECM-SMBIOS-Dedupe-$TimeStamp.csv"
+
+Start-Transcript -Path $LogFile
+#endregion SAFETY CHECKS
+
+Write-Host "Starting MECM SMBIOS GUID de-duplication"
+Write-Host "DryRun mode: $DryRun"
+Write-Host "Minimum inactive age: $MinAgeDays days"
+
+#region DATA COLLECTION
+$devices = Get-CMDevice | Where-Object {
+
+    # Valid SMBIOS GUID
+    $_.SMBIOSGUID -and
+    $_.SMBIOSGUID -ne "00000000-0000-0000-0000-000000000000" -and
+
+    # Has activity timestamp
+    $_.LastActiveTime -and
+
+    # Exclude servers
+    $_.DeviceOS -notlike "*Server*"
+}
+#endregion DATA COLLECTION
+
+#region GROUP & EVALUATE
+$now = Get-Date
+
+$results = @()
+
+$groups = $devices |
+    Group-Object SMBIOSGUID |
+    Where-Object { $_.Count -gt 1 }
+
+foreach ($group in $groups) {
+
+    # Skip if duplicates are too new (race protection)
+    if ($group.Group | Where-Object {
+        $_.CreationDate -gt $now.AddHours(-$IgnoreRecentHours)
+    }) {
+        continue
+    }
+
+    $sorted = $group.Group | Sort-Object LastActiveTime -Descending
+    $keep   = $sorted[0]
+    $remove = $sorted | Select-Object -Skip 1
+
+    foreach ($device in $remove) {
+
+        $inactiveDays = ($now - $device.LastActiveTime).Days
+
+        # Final safety gate
+        if ($inactiveDays -lt $MinAgeDays) {
+            continue
+        }
+
+        $results += [PSCustomObject]@{
+            SMBIOSGUID       = $group.Name
+            KeepDevice       = $keep.Name
+            KeepLastActive   = $keep.LastActiveTime
+            RemoveDevice     = $device.Name
+            RemoveLastActive = $device.LastActiveTime
+            InactiveDays     = $inactiveDays
+            Action           = if ($DryRun) { "DRY-RUN" } else { "DELETE" }
+        }
+    }
+}
+#endregion GROUP & EVALUATE
+
+#region REPORTING
+$results | Export-Csv -Path $CsvFile -NoTypeInformation
+
+Write-Host "`nSummary:"
+Write-Host "Candidates found: $($results.Count)"
+Write-Host "CSV report: $CsvFile"
+#endregion REPORTING
+
+#region DELETION
+if (-not $DryRun) {
+
+    Write-Host "`nLIVE MODE ENABLED — PROCEEDING WITH DELETIONS" -ForegroundColor Red
+
+    foreach ($entry in $results) {
+        try {
+            Remove-CMDevice -Name $entry.RemoveDevice -Force -ErrorAction Stop
+            Write-Host "Deleted: $($entry.RemoveDevice)"
+        }
+        catch {
+            Write-Warning "FAILED to delete $($entry.RemoveDevice): $_"
+        }
+    }
+}
+else {
+    Write-Host "`nDRY RUN — NO DELETIONS PERFORMED" -ForegroundColor Green
+}
+#endregion DELETION
+
+Stop-Transcript
