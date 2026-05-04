@@ -9,9 +9,22 @@
 
     Compatible with MECM 2203 and later (tested on 2403 / 2409).
     Any section that cannot be queried is recorded as "Unable to retrieve data"
-    rather than causing the script to abort.
+    rather than causing the script to abort. All section errors are captured in
+    the Script Execution Log (section 49) in the comparison report.
 
     Run on the Primary Site Server or a machine with the SMS Provider role.
+
+    ── OUTPUT ───────────────────────────────────────────────────────────────────
+    A JSON file is written to -OutputPath (default: current directory). The file
+    name format is: MECM_Config_<SiteCode>_<timestamp>.json
+
+    Pass the output file to Compare-MECMConfig.ps1 to generate an HTML report.
+
+    ── PROGRESS ─────────────────────────────────────────────────────────────────
+    Each data collection section prints a timestamped line to the console:
+      [HH:mm:ss] Collecting: <section name>
+    Errors are printed in red; the full timeline is stored in the JSON output
+    and surfaced in the Script Execution Log section of the compare report.
 
     ── DEPENDENCIES ────────────────────────────────────────────────────────────
     MANDATORY (script will not function without these):
@@ -52,11 +65,31 @@
 .PARAMETER SMSProvider
     SMS Provider server name. Default: local machine.
 
+.PARAMETER LogHoursBack
+    How many hours back to scan MECM and OS log files. Default: 48.
+
+.PARAMETER LogMaxLines
+    Maximum number of lines to read from the tail of each log file. Default: 5000.
+
+.PARAMETER SitePrefix
+    Site/environment prefix for certificate template matching (e.g. "DIEP", "DIES").
+    Auto-detected from the computer name if omitted.
+
+.PARAMETER SkipRemoteProbes
+    Skip section 45 remote role server probing entirely. Use when remote WMI
+    is blocked or when a faster collection run is needed.
+
+.PARAMETER RemoteTimeoutSec
+    WMI timeout in seconds when probing remote role servers. Default: 30.
+
 .EXAMPLE
     .\Get-MECMConfig.ps1
 
 .EXAMPLE
     .\Get-MECMConfig.ps1 -OutputPath "C:\Reports" -SiteCode "P01" -SMSProvider "MECMSERVER01"
+
+.EXAMPLE
+    .\Get-MECMConfig.ps1 -LogHoursBack 24 -SkipRemoteProbes
 #>
 [CmdletBinding()]
 param(
@@ -74,9 +107,49 @@ Set-StrictMode -Off
 $ErrorActionPreference = "SilentlyContinue"
 $WarningPreference     = "SilentlyContinue"
 
+# ── Banner ────────────────────────────────────────────────────────────────────
+$_bw     = 62
+$_border = '+' + ('-' * ($_bw - 2)) + '+'
+function _BannerLine([string]$text, [string]$fg = 'Cyan') {
+    $pad  = $_bw - 4 - $text.Length
+    $lpad = [int][Math]::Floor($pad / 2)
+    $rpad = $pad - $lpad
+    Write-Host ('| ' + (' ' * $lpad) + $text + (' ' * $rpad) + ' |') -ForegroundColor $fg
+}
+Write-Host ''
+Write-Host $_border                                        -ForegroundColor DarkCyan
+_BannerLine 'MECM Configuration Snapshot'                  'White'
+_BannerLine 'Get-MECMConfig.ps1'                           'DarkGray'
+Write-Host $_border                                        -ForegroundColor DarkCyan
+Write-Host ''
+Write-Host '  About'                                       -ForegroundColor Yellow
+Write-Host '    Collects MECM site configuration and saves it as a JSON file.'
+Write-Host '    Read-only — no changes are made to the environment.'
+Write-Host '    Run on the Primary Site Server or a machine with the SMS Provider role.'
+Write-Host ''
+Write-Host '  Requirements'                               -ForegroundColor Yellow
+Write-Host '    - PowerShell 5.1 or later'
+Write-Host '    - MECM Full Administrator (or SMS WMI read rights)'
+Write-Host '    - Run as an account with local admin rights on this machine'
+Write-Host ''
+Write-Host '  Parameters (all optional)'                  -ForegroundColor Yellow
+Write-Host '    -OutputPath      Folder to save the JSON report  (default: current directory)'
+Write-Host '    -SiteCode        MECM site code                  (default: auto-detected)'
+Write-Host '    -SMSProvider     SMS Provider server name        (default: local machine)'
+Write-Host '    -SkipRemoteProbes  Skip remote role server probing'
+Write-Host ''
+Write-Host '  Example'                                    -ForegroundColor Yellow
+Write-Host '    .\Get-MECMConfig.ps1'
+Write-Host '    .\Get-MECMConfig.ps1 -OutputPath C:\Reports -SiteCode P01 -SMSProvider MECMSRV01'
+Write-Host ''
+Write-Host $_border                                        -ForegroundColor DarkCyan
+Write-Host ''
+
 #region ── Helpers ───────────────────────────────────────────────────────────────
 
 $script:SectionErrors = [ordered]@{}
+$script:ExecLog       = [System.Collections.Generic.List[object]]::new()
+$script:RunStart      = Get-Date
 
 function Write-Section ([string]$Name) {
     Write-Host ("  [{0:HH:mm:ss}] Collecting: {1}" -f (Get-Date), $Name) -ForegroundColor Cyan
@@ -85,14 +158,62 @@ function Write-Section ([string]$Name) {
 function Write-SectionError ([string]$Name, [string]$Message) {
     Write-Host ("  [!] {0} - {1}" -f $Name, $Message) -ForegroundColor Red
     $script:SectionErrors[$Name] = $Message
+    [void]$script:ExecLog.Add([ordered]@{
+        DateTime  = (Get-Date).ToString("yyyy-MM-dd HH:mm:ss")
+        Severity  = "Error"
+        Flagged   = $true
+        Component = $Name
+        Message   = $Message
+    })
+}
+
+# Used by the late try/catch sections (46-48) that don't use Invoke-Section.
+function Handle-SectionError ([string]$Name, $ErrorObj) {
+    $msg = $ErrorObj.Exception.Message
+    Write-SectionError $Name $msg
+    [ordered]@{ _Error = "Unable to retrieve data: $msg" }
 }
 
 # Runs a scriptblock; returns its result or an error hashtable on failure.
 # Usage: $report.Key = Invoke-Section "Label" { ... return value ... }
 function Invoke-Section {
     param([string]$Name, [scriptblock]$Block)
+    $t0 = Get-Date
+    [void]$script:ExecLog.Add([ordered]@{
+        DateTime  = $t0.ToString("yyyy-MM-dd HH:mm:ss")
+        Severity  = "Info"
+        Flagged   = $false
+        Component = $Name
+        Message   = "Collection started"
+    })
+    $errsBefore = $global:Error.Count
     try {
-        & $Block
+        $result    = & $Block
+        # Capture non-terminating errors silently suppressed by SilentlyContinue
+        $newErrCnt = $global:Error.Count - $errsBefore
+        if ($newErrCnt -gt 0) {
+            for ($i = $newErrCnt - 1; $i -ge 0; $i--) {
+                $em = try { $global:Error[$i].Exception.Message } catch { $null }
+                if ($em) {
+                    [void]$script:ExecLog.Add([ordered]@{
+                        DateTime  = (Get-Date).ToString("yyyy-MM-dd HH:mm:ss")
+                        Severity  = "Warning"
+                        Flagged   = $true
+                        Component = $Name
+                        Message   = "Suppressed: $em"
+                    })
+                }
+            }
+        }
+        $elapsed = [math]::Round(((Get-Date) - $t0).TotalSeconds, 1)
+        [void]$script:ExecLog.Add([ordered]@{
+            DateTime  = (Get-Date).ToString("yyyy-MM-dd HH:mm:ss")
+            Severity  = "Info"
+            Flagged   = $false
+            Component = $Name
+            Message   = "Completed in ${elapsed}s"
+        })
+        return $result
     } catch {
         $msg = $_.Exception.Message
         Write-SectionError $Name $msg
@@ -109,7 +230,12 @@ function Invoke-WMI {
     try {
         $q = if ($Filter) { "SELECT * FROM $Class WHERE $Filter" } else { "SELECT * FROM $Class" }
         @(Get-WmiObject -Namespace $NS -Query $q -ComputerName $SMSProvider -ErrorAction Stop)
-    } catch { @() }
+    } catch {
+        # Designed to silently return @() on any WMI failure — remove from $Error so
+        # the Invoke-Section monitor does not flag expected version/role mismatches.
+        if ($global:Error.Count -gt 0) { [void]$global:Error.RemoveAt(0) }
+        @()
+    }
 }
 
 # Safe property read — returns $null instead of throwing if property missing.
@@ -122,6 +248,7 @@ function Get-EmbeddedProps ($wmiObj) {
     $h = [ordered]@{}
     if (-not $wmiObj) { return $h }
     foreach ($p in @($wmiObj.Props)) {
+        if ($null -eq $p -or -not $p.PropertyName) { continue }
         try { $h[$p.PropertyName] = $p.Value } catch {}
     }
     return $h
@@ -131,6 +258,7 @@ function Get-EmbeddedPropLists ($wmiObj) {
     $h = [ordered]@{}
     if (-not $wmiObj) { return $h }
     foreach ($p in @($wmiObj.PropLists)) {
+        if ($null -eq $p -or -not $p.PropertyListName) { continue }
         try { $h[$p.PropertyListName] = @($p.Values) } catch {}
     }
     return $h
@@ -215,7 +343,7 @@ function Probe-RoleServer {
         try {
             $grp     = [ADSI]"WinNT://$Server/$grpName,group"
             $members = @($grp.psbase.Invoke("Members") | ForEach-Object {
-                try { $m = [ADSI]$_; "$($m.psbase.Parent.Name)\$($m.Name[0])" } catch { "?" }
+                try { $m = [ADSI]$_; "$($m.psbase.Parent.Name)\$(if ($m.Name) { $m.Name[0] } else { '?' })" } catch { "?" }
             })
             $result.LocalGroups += [ordered]@{ Group=$grpName; Count=$members.Count; Members=$members -join '; ' }
         } catch {
@@ -430,6 +558,7 @@ $report = [ordered]@{
     OSEventLogs             = $null
     FirewallConfig          = $null
     ScriptErrors            = $null
+    ScriptExecutionLog      = $null
 }
 
 # Shared variables initialised here so later sections degrade safely if
@@ -1057,8 +1186,10 @@ $report.Logs = Invoke-Section "Logs" {
 
     # ── Discover log directory ────────────────────────────────────────────────
     $logDir = $null
-    $regLogging = Get-ItemProperty "HKLM:\SOFTWARE\Microsoft\SMS\Logging" -ErrorAction SilentlyContinue
-    if ($regLogging) { $logDir = $regLogging."Log Directory" }
+    if (Test-Path "HKLM:\SOFTWARE\Microsoft\SMS\Logging") {
+        $regLogging = Get-ItemProperty "HKLM:\SOFTWARE\Microsoft\SMS\Logging" -ErrorAction SilentlyContinue
+        if ($regLogging) { $logDir = $regLogging."Log Directory" }
+    }
     if (-not $logDir -or -not (Test-Path $logDir)) {
         $installDir = sprop $report.SiteInfo InstallDir
         if ($installDir) { $logDir = Join-Path $installDir "Logs" }
@@ -1719,6 +1850,7 @@ $report.HostSystem = Invoke-Section "HostSystem" {
         try {
             if ($SMSProvider -eq $env:COMPUTERNAME -or $SMSProvider -eq "localhost" -or $SMSProvider -eq ".") {
                 $base = if ($Hive -eq "HKLM") { "HKLM:\$SubKey" } else { "HKCU:\$SubKey" }
+                if (-not (Test-Path $base)) { return $null }
                 Get-ItemProperty $base -ErrorAction Stop
             } else {
                 $hiveEnum = if ($Hive -eq "HKLM") { [Microsoft.Win32.RegistryHive]::LocalMachine } else { [Microsoft.Win32.RegistryHive]::CurrentUser }
@@ -1815,7 +1947,7 @@ $report.HostSystem = Invoke-Section "HostSystem" {
     # ── 3. CPU ────────────────────────────────────────────────────────────────
     $procs = wq "Win32_Processor"
 
-    $cpuName   = $null; try { $cpuName   = ($procs | Select-Object -First 1).Name.Trim() } catch {}
+    $cpuName   = $null; try { $_n = ($procs | Select-Object -First 1).Name; if ($_n) { $cpuName = $_n.Trim() } } catch {}
     $cpuPCores = $null; try { $cpuPCores = ($procs | Measure-Object -Property NumberOfCores -Sum).Sum } catch {}
     $cpuLProcs = $null; try { $cpuLProcs = ($procs | Measure-Object -Property NumberOfLogicalProcessors -Sum).Sum } catch {}
     $cpuMHz    = $null; try { $cpuMHz    = ($procs | Select-Object -First 1).MaxClockSpeed } catch {}
@@ -1845,7 +1977,7 @@ $report.HostSystem = Invoke-Section "HostSystem" {
         try { $speedMHz = $_.ConfiguredClockSpeed } catch {}
         if (-not $speedMHz) { try { $speedMHz = $_.Speed } catch {} }
         $modCapGB  = $null; try { $modCapGB  = [math]::Round([long](sprop $_ Capacity) / 1GB, 2) } catch {}
-        $modPartNo = $null; try { $modPartNo = (sprop $_ PartNumber).Trim() } catch {}
+        $modPartNo = $null; try { $_pn = sprop $_ PartNumber; if ($_pn) { $modPartNo = $_pn.Trim() } } catch {}
         $modType   = switch ([int](sprop $_ SMBIOSMemoryType)) {
             20 { "DDR" }; 21 { "DDR2" }; 24 { "DDR3" }; 26 { "DDR4" }; 34 { "DDR5" }
             default { sprop $_ MemoryType }
@@ -2132,8 +2264,8 @@ $report.Certificates = Invoke-Section "Certificates" {
     @($certs | Sort-Object FQDN, CertificateType | ForEach-Object {
         $validFrom  = $null
         $validUntil = $null
-        try { $validFrom  = [System.Management.ManagementDateTimeConverter]::ToDateTime($_.ValidFromDate).ToString("yyyy-MM-dd") } catch {}
-        try { $validUntil = [System.Management.ManagementDateTimeConverter]::ToDateTime($_.ValidUntilDate).ToString("yyyy-MM-dd") } catch {}
+        if ($_.ValidFromDate)  { try { $validFrom  = [System.Management.ManagementDateTimeConverter]::ToDateTime($_.ValidFromDate).ToString("yyyy-MM-dd")  } catch {} }
+        if ($_.ValidUntilDate) { try { $validUntil = [System.Management.ManagementDateTimeConverter]::ToDateTime($_.ValidUntilDate).ToString("yyyy-MM-dd") } catch {} }
         [ordered]@{
             FQDN            = sprop $_ FQDN
             CertificateType = sprop $_ CertificateType
@@ -2367,6 +2499,10 @@ $report.GroupPolicySettings = Invoke-Section "GroupPolicySettings" {
     }
 
     foreach ($rp in $regPaths.GetEnumerator()) {
+        if (-not (Test-Path $rp.Value)) {
+            $gpData[$rp.Key] = [ordered]@{ _Status = "Not configured (key absent)" }
+            continue
+        }
         $props = Get-ItemProperty $rp.Value -ErrorAction SilentlyContinue
         if ($props) {
             $h = [ordered]@{}
@@ -2497,19 +2633,17 @@ $report.HealthChecks = Invoke-Section "HealthChecks" {
         @{ Drive = "U"; MinGB = 50; Label = "Disk: U:\ >= 50 GB free" }
     )) {
         try {
-            $psDrive = Get-PSDrive -Name $diskDef.Drive -ErrorAction SilentlyContinue
-            if (-not $psDrive) {
-                Add-Check $diskDef.Label "Disk" "NotInstalled" "Drive $($diskDef.Drive): not present on this system"
+            $psDrive = Get-PSDrive -Name $diskDef.Drive -ErrorAction Stop
+            $freeGB  = [math]::Round($psDrive.Free / 1GB, 2)
+            if ($freeGB -ge $diskDef.MinGB) {
+                Add-Check $diskDef.Label "Disk" "Pass" "$freeGB GB free"
             } else {
-                $freeGB = [math]::Round($psDrive.Free / 1GB, 2)
-                if ($freeGB -ge $diskDef.MinGB) {
-                    Add-Check $diskDef.Label "Disk" "Pass" "$freeGB GB free"
-                } else {
-                    Add-Check $diskDef.Label "Disk" "Fail" "$freeGB GB free (minimum: $($diskDef.MinGB) GB)"
-                }
+                Add-Check $diskDef.Label "Disk" "Fail" "$freeGB GB free (minimum: $($diskDef.MinGB) GB)"
             }
         } catch {
-            Add-Check $diskDef.Label "Disk" "Error" $_.Exception.Message
+            # Drive absent is expected on machines without that volume — remove from $Error
+            if ($global:Error.Count -gt 0) { [void]$global:Error.RemoveAt(0) }
+            Add-Check $diskDef.Label "Disk" "NotInstalled" "Drive $($diskDef.Drive): not present on this system"
         }
     }
 
@@ -3158,7 +3292,7 @@ $report.ServiceAccounts = Invoke-Section "ServiceAccounts" {
                 try {
                     $m = [ADSI]$_
                     $domain = try { ($m.psbase.Parent.Name) } catch { $env:COMPUTERNAME }
-                    "$domain\$($m.Name[0])"
+                    "$domain\$(if ($m.Name) { $m.Name[0] } else { '?' })"
                 } catch { "?" }
             })
             $localGroups += [ordered]@{
@@ -3714,6 +3848,23 @@ try {
 #endregion
 
 #region ── Output ─────────────────────────────────────────────────────────────────
+
+$totalElapsed = [math]::Round(((Get-Date) - $script:RunStart).TotalSeconds, 0)
+[void]$script:ExecLog.Add([ordered]@{
+    DateTime  = (Get-Date).ToString("yyyy-MM-dd HH:mm:ss")
+    Severity  = if ($script:SectionErrors.Count -gt 0) { "Warning" } else { "Info" }
+    Flagged   = ($script:SectionErrors.Count -gt 0)
+    Component = "Script"
+    Message   = "Collection complete. Errors: $($script:SectionErrors.Count). Total time: ${totalElapsed}s"
+})
+$report.ScriptExecutionLog = [ordered]@{
+    Summary = [ordered]@{
+        TotalSections = @($script:ExecLog | Where-Object { $_.Message -eq 'Collection started' }).Count
+        ErrorCount    = $script:SectionErrors.Count
+        TotalSeconds  = $totalElapsed
+    }
+    Entries = @($script:ExecLog)
+}
 
 $report.ScriptErrors = $script:SectionErrors
 
