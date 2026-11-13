@@ -1,29 +1,8 @@
-<!DOCTYPE html>
-<html lang="en">
-<head>
-<meta charset="utf-8">
-<title>Knowledge Article: MECM Client Policy Reset and Client Reinstall</title>
-<style>
-  body { font-family: Segoe UI, Arial, sans-serif; font-size: 15px; line-height: 1.5; color: #1f1f1f; margin: 0; padding: 0; }
-  h1 { font-size: 26px; margin-bottom: 4px; }
-  h2 { font-size: 20px; margin-top: 32px; border-bottom: 1px solid #cccccc; padding-bottom: 4px; }
-  h3 { font-size: 16px; margin-top: 24px; }
-  p.meta { color: #555555; margin-top: 0; }
-  table { border-collapse: collapse; width: 100%; margin: 12px 0; }
-  th, td { border: 1px solid #bbbbbb; padding: 6px 10px; text-align: left; vertical-align: top; }
-  th { background: #eeeeee; }
-  code { font-family: Consolas, "Courier New", monospace; background: #f2f2f2; padding: 1px 4px; }
-  pre { font-family: Consolas, "Courier New", monospace; font-size: 13px; background: #f2f2f2; border: 1px solid #cccccc; padding: 12px; overflow-x: auto; white-space: pre; }
-  pre code { background: none; padding: 0; }
-  .todo { background: #fff3cd; border: 1px solid #e0c060; padding: 1px 4px; }
-</style>
-</head>
-<body>
+<div align="left" style="width:100%;max-width:none;margin:0;padding:0;float:none;text-align:left;font-family:'Segoe UI',Arial,sans-serif;font-size:15px;line-height:1.5;color:#1f1f1f;">
+<h1 style="font-size:26px;margin:0 0 4px 0;text-align:left;">Knowledge Article: MECM Client Policy Reset and Client Reinstall</h1>
+<p style="color:#555555;margin-top:0;">Audience: Local Administrators &middot; Last updated: 13 November 2026</p>
 
-<h1>Knowledge Article: MECM Client Policy Reset and Client Reinstall</h1>
-<p class="meta">Audience: Local Administrators &middot; Last updated: 13 November 2026</p>
-
-<h2>Purpose</h2>
+<h2 style="font-size:20px;margin:32px 0 8px 0;padding-bottom:4px;border-bottom:1px solid #cccccc;text-align:left;">Purpose</h2>
 <p>This article gives Local Administrators two ways to recover a device whose MECM (Configuration Manager) client is not receiving software updates or not communicating with the site.</p>
 <ul>
   <li><strong>Option 1, reset client policy:</strong> run the script in this article. It takes about 7 minutes, needs no restart and is safe to run on a healthy client. Try this first.</li>
@@ -31,7 +10,7 @@
 </ul>
 <p>Background: following the MECM policy signing incident in October and November 2026, some clients are holding out-of-date policy locally. The client does not clear this on its own, so it has to be reset.</p>
 
-<h2>When to use this article</h2>
+<h2 style="font-size:20px;margin:32px 0 8px 0;padding-bottom:4px;border-bottom:1px solid #cccccc;text-align:left;">When to use this article</h2>
 <p>Use it when a device shows one or more of these symptoms:</p>
 <ul>
   <li>Software updates are not appearing, or not installing, in Software Center.</li>
@@ -39,19 +18,19 @@
   <li>Software Center is empty or missing items it normally shows.</li>
   <li>The Configuration Manager control panel Actions tab lists only one or two actions.</li>
   <li>The device shows as inactive in the MECM console, or has no recent policy request or heartbeat.</li>
-  <li><code>C:\Windows\CCM\Logs\PolicyAgent.log</code> shows errors about a policy signature or hash failing verification.</li>
+  <li><code style="font-family:Consolas,'Courier New',monospace;background:#f2f2f2;padding:1px 4px;">C:\Windows\CCM\Logs\PolicyAgent.log</code> shows errors about a policy signature or hash failing verification.</li>
 </ul>
 
-<h2>Before you start</h2>
+<h2 style="font-size:20px;margin:32px 0 8px 0;padding-bottom:4px;border-bottom:1px solid #cccccc;text-align:left;">Before you start</h2>
 <ul>
   <li><strong>Rights:</strong> you need local administrator rights on the device.</li>
   <li><strong>Network:</strong> the device must be on the network and able to reach the MECM management point.</li>
   <li><strong>Time:</strong> the script runs for about 7 minutes. Do not close the window while it runs.</li>
   <li><strong>Impact:</strong> no restart is needed and the user can keep working. The client downloads all of its policy again, so deployments can take 30 to 60 minutes to reappear in Software Center.</li>
-  <li><strong>Record:</strong> note the device name (run <code>hostname</code>) in case you need to escalate.</li>
+  <li><strong>Record:</strong> note the device name (run <code style="font-family:Consolas,'Courier New',monospace;background:#f2f2f2;padding:1px 4px;">hostname</code>) in case you need to escalate.</li>
 </ul>
 
-<h2>Option 1: Reset client policy</h2>
+<h2 style="font-size:20px;margin:32px 0 8px 0;padding-bottom:4px;border-bottom:1px solid #cccccc;text-align:left;">Option 1: Reset client policy</h2>
 <p>The script clears the client's local policy, requests a fresh copy from the site, then starts a software update scan and evaluation.</p>
 <ol>
   <li>Sign in to the device with a local administrator account.</li>
@@ -60,9 +39,9 @@
   <li>Wait about 7 minutes. The window shows nothing until the script finishes.</li>
   <li>Read the single line of output, then go to "Check the result".</li>
 </ol>
-<p>Paste the script directly into the window. A saved <code>.ps1</code> file may be blocked by the device's script execution policy.</p>
+<p>Paste the script directly into the window. A saved <code style="font-family:Consolas,'Courier New',monospace;background:#f2f2f2;padding:1px 4px;">.ps1</code> file may be blocked by the device's script execution policy.</p>
 
-<pre><code># Runs one client action and records whether it succeeded
+<pre style="font-family:Consolas,'Courier New',monospace;font-size:13px;background:#f2f2f2;border:1px solid #cccccc;padding:12px;margin:12px 0;white-space:pre;overflow-x:auto;text-align:left;"><code style="font-family:Consolas,'Courier New',monospace;"># Runs one client action and records whether it succeeded
 function Invoke-ClientAction {
     param(
         [string]$Name,
@@ -105,52 +84,52 @@ $results += Invoke-ClientAction -Name 'Eval' -Method 'TriggerSchedule' -Argument
 $results -join '; '</code></pre>
 
 <p>What each step does:</p>
-<table>
-  <tr><th>Step</th><th>Action</th><th>Wait afterwards</th></tr>
-  <tr><td>Reset</td><td>Clears all locally held policy</td><td>60 seconds</td></tr>
-  <tr><td>Policy</td><td>Requests a full set of policy from the site</td><td>180 seconds</td></tr>
-  <tr><td>Scan</td><td>Starts a software updates scan</td><td>120 seconds</td></tr>
-  <tr><td>Eval</td><td>Evaluates software update deployments</td><td>None</td></tr>
+<table width="100%" cellpadding="6" cellspacing="0" border="1" style="border-collapse:collapse;width:100%;margin:12px 0;border:1px solid #bbbbbb;">
+  <tr><th align="left" valign="top" style="border:1px solid #bbbbbb;padding:6px 10px;background:#eeeeee;text-align:left;">Step</th><th align="left" valign="top" style="border:1px solid #bbbbbb;padding:6px 10px;background:#eeeeee;text-align:left;">Action</th><th align="left" valign="top" style="border:1px solid #bbbbbb;padding:6px 10px;background:#eeeeee;text-align:left;">Wait afterwards</th></tr>
+  <tr><td align="left" valign="top" style="border:1px solid #bbbbbb;padding:6px 10px;text-align:left;">Reset</td><td align="left" valign="top" style="border:1px solid #bbbbbb;padding:6px 10px;text-align:left;">Clears all locally held policy</td><td align="left" valign="top" style="border:1px solid #bbbbbb;padding:6px 10px;text-align:left;">60 seconds</td></tr>
+  <tr><td align="left" valign="top" style="border:1px solid #bbbbbb;padding:6px 10px;text-align:left;">Policy</td><td align="left" valign="top" style="border:1px solid #bbbbbb;padding:6px 10px;text-align:left;">Requests a full set of policy from the site</td><td align="left" valign="top" style="border:1px solid #bbbbbb;padding:6px 10px;text-align:left;">180 seconds</td></tr>
+  <tr><td align="left" valign="top" style="border:1px solid #bbbbbb;padding:6px 10px;text-align:left;">Scan</td><td align="left" valign="top" style="border:1px solid #bbbbbb;padding:6px 10px;text-align:left;">Starts a software updates scan</td><td align="left" valign="top" style="border:1px solid #bbbbbb;padding:6px 10px;text-align:left;">120 seconds</td></tr>
+  <tr><td align="left" valign="top" style="border:1px solid #bbbbbb;padding:6px 10px;text-align:left;">Eval</td><td align="left" valign="top" style="border:1px solid #bbbbbb;padding:6px 10px;text-align:left;">Evaluates software update deployments</td><td align="left" valign="top" style="border:1px solid #bbbbbb;padding:6px 10px;text-align:left;">None</td></tr>
 </table>
 
-<h2>Check the result</h2>
+<h2 style="font-size:20px;margin:32px 0 8px 0;padding-bottom:4px;border-bottom:1px solid #cccccc;text-align:left;">Check the result</h2>
 <p>A successful run prints this line:</p>
-<pre><code>Reset=OK; Policy=OK; Scan=OK; Eval=OK</code></pre>
+<pre style="font-family:Consolas,'Courier New',monospace;font-size:13px;background:#f2f2f2;border:1px solid #cccccc;padding:12px;margin:12px 0;white-space:pre;overflow-x:auto;text-align:left;"><code style="font-family:Consolas,'Courier New',monospace;">Reset=OK; Policy=OK; Scan=OK; Eval=OK</code></pre>
 
-<table>
-  <tr><th>Output</th><th>What it means</th><th>What to do</th></tr>
+<table width="100%" cellpadding="6" cellspacing="0" border="1" style="border-collapse:collapse;width:100%;margin:12px 0;border:1px solid #bbbbbb;">
+  <tr><th align="left" valign="top" style="border:1px solid #bbbbbb;padding:6px 10px;background:#eeeeee;text-align:left;">Output</th><th align="left" valign="top" style="border:1px solid #bbbbbb;padding:6px 10px;background:#eeeeee;text-align:left;">What it means</th><th align="left" valign="top" style="border:1px solid #bbbbbb;padding:6px 10px;background:#eeeeee;text-align:left;">What to do</th></tr>
   <tr>
-    <td>All four show <code>OK</code></td>
-    <td>The client accepted every request</td>
-    <td>Confirm recovery using the checks below</td>
+    <td align="left" valign="top" style="border:1px solid #bbbbbb;padding:6px 10px;text-align:left;">All four show <code style="font-family:Consolas,'Courier New',monospace;background:#f2f2f2;padding:1px 4px;">OK</code></td>
+    <td align="left" valign="top" style="border:1px solid #bbbbbb;padding:6px 10px;text-align:left;">The client accepted every request</td>
+    <td align="left" valign="top" style="border:1px solid #bbbbbb;padding:6px 10px;text-align:left;">Confirm recovery using the checks below</td>
   </tr>
   <tr>
-    <td><code>Reset=FAILED</code>, or all four failed</td>
-    <td>The window was not run as administrator, or the client is not installed or not responding</td>
-    <td>Run it again in an administrator window. If it fails again, go to Option 2</td>
+    <td align="left" valign="top" style="border:1px solid #bbbbbb;padding:6px 10px;text-align:left;"><code style="font-family:Consolas,'Courier New',monospace;background:#f2f2f2;padding:1px 4px;">Reset=FAILED</code>, or all four failed</td>
+    <td align="left" valign="top" style="border:1px solid #bbbbbb;padding:6px 10px;text-align:left;">The window was not run as administrator, or the client is not installed or not responding</td>
+    <td align="left" valign="top" style="border:1px solid #bbbbbb;padding:6px 10px;text-align:left;">Run it again in an administrator window. If it fails again, go to Option 2</td>
   </tr>
   <tr>
-    <td>Only <code>Scan</code> or <code>Eval</code> failed</td>
-    <td>Policy had not finished arriving when the step ran</td>
-    <td>Wait 10 minutes, then run <strong>Software Updates Scan Cycle</strong> and <strong>Software Updates Deployment Evaluation Cycle</strong> from the control panel Actions tab</td>
+    <td align="left" valign="top" style="border:1px solid #bbbbbb;padding:6px 10px;text-align:left;">Only <code style="font-family:Consolas,'Courier New',monospace;background:#f2f2f2;padding:1px 4px;">Scan</code> or <code style="font-family:Consolas,'Courier New',monospace;background:#f2f2f2;padding:1px 4px;">Eval</code> failed</td>
+    <td align="left" valign="top" style="border:1px solid #bbbbbb;padding:6px 10px;text-align:left;">Policy had not finished arriving when the step ran</td>
+    <td align="left" valign="top" style="border:1px solid #bbbbbb;padding:6px 10px;text-align:left;">Wait 10 minutes, then run <strong>Software Updates Scan Cycle</strong> and <strong>Software Updates Deployment Evaluation Cycle</strong> from the control panel Actions tab</td>
   </tr>
 </table>
 
-<p><code>OK</code> means the client accepted the request. It does not confirm the scan or evaluation finished successfully, so check the device 30 to 60 minutes later:</p>
+<p><code style="font-family:Consolas,'Courier New',monospace;background:#f2f2f2;padding:1px 4px;">OK</code> means the client accepted the request. It does not confirm the scan or evaluation finished successfully, so check the device 30 to 60 minutes later:</p>
 <ol>
   <li>Open Control Panel &gt; <strong>Configuration Manager</strong> &gt; <strong>Actions</strong>. A recovered client lists a full set of actions, not just one or two.</li>
   <li>Open <strong>Software Center</strong> and confirm updates and applications are listed and can download.</li>
-  <li>Open <code>C:\Windows\CCM\Logs\PolicyAgent.log</code> and confirm there are no new signature or hash errors after the time you ran the script.</li>
+  <li>Open <code style="font-family:Consolas,'Courier New',monospace;background:#f2f2f2;padding:1px 4px;">C:\Windows\CCM\Logs\PolicyAgent.log</code> and confirm there are no new signature or hash errors after the time you ran the script.</li>
 </ol>
 <p>If the device has not recovered after 60 minutes, go to Option 2.</p>
 
-<h2>Option 2: Reinstall the client</h2>
+<h2 style="font-size:20px;margin:32px 0 8px 0;padding-bottom:4px;border-bottom:1px solid #cccccc;text-align:left;">Option 2: Reinstall the client</h2>
 <p>Use this when Option 1 fails, or when the device still cannot get software updates or communicate with the site an hour after a successful reset. A clean reinstall removes the client and everything it holds locally, then installs it fresh.</p>
 
-<h3>Before you start</h3>
+<h3 style="font-size:16px;margin:24px 0 8px 0;text-align:left;">Before you start</h3>
 <p>The reinstall is run from the MECM console on COR TSP, so nothing needs to be run on the device itself. You need access to the console and rights to install clients. The device must be powered on and connected to the network.</p>
 
-<h3>Steps</h3>
+<h3 style="font-size:16px;margin:24px 0 8px 0;text-align:left;">Steps</h3>
 <ol>
   <li>Sign in to COR TSP and open the <strong>Configuration Manager console</strong>.</li>
   <li>Go to <strong>Assets and Compliance</strong> &gt; <strong>Devices</strong>.</li>
@@ -177,8 +156,8 @@ $results -join '; '</code></pre>
   <li>If the device has not changed in the console after 60 minutes, escalate. The push may not have reached the device.</li>
 </ul>
 
-<h2>Escalation</h2>
-<p>If the device is still not working after Option 2, raise a DSMS ticket to <span class="todo">[ASSIGNMENT GROUP TO BE CONFIRMED]</span> and include:</p>
+<h2 style="font-size:20px;margin:32px 0 8px 0;padding-bottom:4px;border-bottom:1px solid #cccccc;text-align:left;">Escalation</h2>
+<p>If the device is still not working after Option 2, raise a DSMS ticket to <span style="background:#fff3cd;border:1px solid #e0c060;padding:1px 4px;">[ASSIGNMENT GROUP TO BE CONFIRMED]</span> and include:</p>
 <ul>
   <li>Device name and location.</li>
   <li>Date and time each option was attempted.</li>
@@ -186,14 +165,12 @@ $results -join '; '</code></pre>
   <li>The symptoms still present.</li>
   <li>Copies of these logs:
     <ul>
-      <li><code>C:\Windows\CCM\Logs\PolicyAgent.log</code></li>
-      <li><code>C:\Windows\CCM\Logs\ClientIDManagerStartup.log</code></li>
-      <li><code>C:\Windows\CCM\Logs\LocationServices.log</code></li>
-      <li><code>C:\Windows\CCM\Logs\CcmMessaging.log</code></li>
-      <li><code>C:\Windows\ccmsetup\Logs\ccmsetup.log</code></li>
+      <li><code style="font-family:Consolas,'Courier New',monospace;background:#f2f2f2;padding:1px 4px;">C:\Windows\CCM\Logs\PolicyAgent.log</code></li>
+      <li><code style="font-family:Consolas,'Courier New',monospace;background:#f2f2f2;padding:1px 4px;">C:\Windows\CCM\Logs\ClientIDManagerStartup.log</code></li>
+      <li><code style="font-family:Consolas,'Courier New',monospace;background:#f2f2f2;padding:1px 4px;">C:\Windows\CCM\Logs\LocationServices.log</code></li>
+      <li><code style="font-family:Consolas,'Courier New',monospace;background:#f2f2f2;padding:1px 4px;">C:\Windows\CCM\Logs\CcmMessaging.log</code></li>
+      <li><code style="font-family:Consolas,'Courier New',monospace;background:#f2f2f2;padding:1px 4px;">C:\Windows\ccmsetup\Logs\ccmsetup.log</code></li>
     </ul>
   </li>
 </ul>
-
-</body>
-</html>
+</div>
