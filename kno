@@ -1,0 +1,191 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Knowledge Article: MECM Client Policy Reset and Client Reinstall</title>
+<style>
+  body { font-family: Segoe UI, Arial, sans-serif; font-size: 15px; line-height: 1.5; color: #1f1f1f; max-width: 900px; margin: 24px auto; padding: 0 16px; }
+  h1 { font-size: 26px; margin-bottom: 4px; }
+  h2 { font-size: 20px; margin-top: 32px; border-bottom: 1px solid #cccccc; padding-bottom: 4px; }
+  h3 { font-size: 16px; margin-top: 24px; }
+  p.meta { color: #555555; margin-top: 0; }
+  table { border-collapse: collapse; width: 100%; margin: 12px 0; }
+  th, td { border: 1px solid #bbbbbb; padding: 6px 10px; text-align: left; vertical-align: top; }
+  th { background: #eeeeee; }
+  code { font-family: Consolas, "Courier New", monospace; background: #f2f2f2; padding: 1px 4px; }
+  pre { font-family: Consolas, "Courier New", monospace; font-size: 13px; background: #f2f2f2; border: 1px solid #cccccc; padding: 12px; overflow-x: auto; white-space: pre; }
+  pre code { background: none; padding: 0; }
+  .todo { background: #fff3cd; border: 1px solid #e0c060; padding: 1px 4px; }
+</style>
+</head>
+<body>
+
+<h1>Knowledge Article: MECM Client Policy Reset and Client Reinstall</h1>
+<p class="meta">Audience: Local Administrators &middot; Last updated: 13 November 2026</p>
+
+<h2>Purpose</h2>
+<p>This article gives Local Administrators two ways to recover a device whose MECM (Configuration Manager) client is not receiving software updates or not communicating with the site.</p>
+<ul>
+  <li><strong>Option 1, reset client policy:</strong> run the script in this article. It takes about 7 minutes, needs no restart and is safe to run on a healthy client. Try this first.</li>
+  <li><strong>Option 2, reinstall the client:</strong> use this only if Option 1 does not fix the device.</li>
+</ul>
+<p>Background: following the MECM policy signing incident in October and November 2026, some clients are holding out-of-date policy locally. The client does not clear this on its own, so it has to be reset.</p>
+
+<h2>When to use this article</h2>
+<p>Use it when a device shows one or more of these symptoms:</p>
+<ul>
+  <li>Software updates are not appearing, or not installing, in Software Center.</li>
+  <li>Applications or updates sit at "waiting" or 0% and never download.</li>
+  <li>Software Center is empty or missing items it normally shows.</li>
+  <li>The Configuration Manager control panel Actions tab lists only one or two actions.</li>
+  <li>The device shows as inactive in the MECM console, or has no recent policy request or heartbeat.</li>
+  <li><code>C:\Windows\CCM\Logs\PolicyAgent.log</code> shows errors about a policy signature or hash failing verification.</li>
+</ul>
+
+<h2>Before you start</h2>
+<ul>
+  <li><strong>Rights:</strong> you need local administrator rights on the device.</li>
+  <li><strong>Network:</strong> the device must be on the network and able to reach the MECM management point.</li>
+  <li><strong>Time:</strong> the script runs for about 7 minutes. Do not close the window while it runs.</li>
+  <li><strong>Impact:</strong> no restart is needed and the user can keep working. The client downloads all of its policy again, so deployments can take 30 to 60 minutes to reappear in Software Center.</li>
+  <li><strong>Record:</strong> note the device name (run <code>hostname</code>) in case you need to escalate.</li>
+</ul>
+
+<h2>Option 1: Reset client policy</h2>
+<p>The script clears the client's local policy, requests a fresh copy from the site, then starts a software update scan and evaluation.</p>
+<ol>
+  <li>Sign in to the device with a local administrator account.</li>
+  <li>Open the Start menu, type <strong>PowerShell</strong>, right-click <strong>Windows PowerShell</strong> and choose <strong>Run as administrator</strong>.</li>
+  <li>Copy the whole script below, paste it into the window and press Enter. If it stops at the last line, press Enter once more.</li>
+  <li>Wait about 7 minutes. The window shows nothing until the script finishes.</li>
+  <li>Read the single line of output, then go to "Check the result".</li>
+</ol>
+<p>Paste the script directly into the window. A saved <code>.ps1</code> file may be blocked by the device's script execution policy.</p>
+
+<pre><code># Runs one client action and records whether it succeeded
+function Invoke-ClientAction {
+    param(
+        [string]$Name,
+        [string]$Method,
+        [hashtable]$Arguments
+    )
+
+    try {
+        $r = Invoke-CimMethod -Namespace 'root\ccm' -ClassName 'SMS_Client' `
+                              -MethodName $Method -Arguments $Arguments -ErrorAction Stop
+
+        if ($null -ne $r.ReturnValue -and $r.ReturnValue -ne 0) {
+            return "$Name=FAILED (return $($r.ReturnValue))"
+        }
+        return "$Name=OK"
+    }
+    catch {
+        return "$Name=FAILED ($($_.Exception.Message.Trim()))"
+    }
+}
+
+$results = @()
+
+# 1. Purge local policy
+$results += Invoke-ClientAction -Name 'Reset' -Method 'ResetPolicy' -Arguments @{ uFlags = [uint32]1 }
+Start-Sleep -Seconds 60
+
+# 2. Machine policy retrieval
+$results += Invoke-ClientAction -Name 'Policy' -Method 'TriggerSchedule' -Arguments @{ sScheduleID = '{00000000-0000-0000-0000-000000000021}' }
+Start-Sleep -Seconds 180
+
+# 3. Software updates scan
+$results += Invoke-ClientAction -Name 'Scan' -Method 'TriggerSchedule' -Arguments @{ sScheduleID = '{00000000-0000-0000-0000-000000000113}' }
+Start-Sleep -Seconds 120
+
+# 4. Software updates deployment evaluation
+$results += Invoke-ClientAction -Name 'Eval' -Method 'TriggerSchedule' -Arguments @{ sScheduleID = '{00000000-0000-0000-0000-000000000108}' }
+
+# One line of output per client
+$results -join '; '</code></pre>
+
+<p>What each step does:</p>
+<table>
+  <tr><th>Step</th><th>Action</th><th>Wait afterwards</th></tr>
+  <tr><td>Reset</td><td>Clears all locally held policy</td><td>60 seconds</td></tr>
+  <tr><td>Policy</td><td>Requests a full set of policy from the site</td><td>180 seconds</td></tr>
+  <tr><td>Scan</td><td>Starts a software updates scan</td><td>120 seconds</td></tr>
+  <tr><td>Eval</td><td>Evaluates software update deployments</td><td>None</td></tr>
+</table>
+
+<h2>Check the result</h2>
+<p>A successful run prints this line:</p>
+<pre><code>Reset=OK; Policy=OK; Scan=OK; Eval=OK</code></pre>
+
+<table>
+  <tr><th>Output</th><th>What it means</th><th>What to do</th></tr>
+  <tr>
+    <td>All four show <code>OK</code></td>
+    <td>The client accepted every request</td>
+    <td>Confirm recovery using the checks below</td>
+  </tr>
+  <tr>
+    <td><code>Reset=FAILED</code>, or all four failed</td>
+    <td>The window was not run as administrator, or the client is not installed or not responding</td>
+    <td>Run it again in an administrator window. If it fails again, go to Option 2</td>
+  </tr>
+  <tr>
+    <td>Only <code>Scan</code> or <code>Eval</code> failed</td>
+    <td>Policy had not finished arriving when the step ran</td>
+    <td>Wait 10 minutes, then run <strong>Software Updates Scan Cycle</strong> and <strong>Software Updates Deployment Evaluation Cycle</strong> from the control panel Actions tab</td>
+  </tr>
+</table>
+
+<p><code>OK</code> means the client accepted the request. It does not confirm the scan or evaluation finished successfully, so check the device 30 to 60 minutes later:</p>
+<ol>
+  <li>Open Control Panel &gt; <strong>Configuration Manager</strong> &gt; <strong>Actions</strong>. A recovered client lists a full set of actions, not just one or two.</li>
+  <li>Open <strong>Software Center</strong> and confirm updates and applications are listed and can download.</li>
+  <li>Open <code>C:\Windows\CCM\Logs\PolicyAgent.log</code> and confirm there are no new signature or hash errors after the time you ran the script.</li>
+</ol>
+<p>If the device has not recovered after 60 minutes, go to Option 2.</p>
+
+<h2>Option 2: Reinstall the client</h2>
+<p>Use this when Option 1 fails, or when the device still cannot get software updates or communicate with the site an hour after a successful reset. A clean reinstall removes the client and everything it holds locally, then installs it fresh.</p>
+
+<h3>Route A: request a remote reinstall</h3>
+<p>This is the simpler route and needs nothing done on the device. Ask the MECM team to push a client reinstall, and give them the device name. The device must be powered on and connected to the network.</p>
+
+<h3>Route B: reinstall locally</h3>
+<ol>
+  <li>Open <strong>Windows PowerShell</strong> as administrator.</li>
+  <li>Uninstall the existing client:
+    <pre><code>C:\Windows\ccmsetup\ccmsetup.exe /uninstall</code></pre>
+  </li>
+  <li>Wait for the uninstall to finish. Open <code>C:\Windows\ccmsetup\Logs\ccmsetup.log</code> and look for a final line reading <code>CcmSetup is exiting with return code 0</code>. This usually takes a few minutes.</li>
+  <li>Install the client using the approved command for your site:
+    <pre><code><span class="todo">[INSTALL COMMAND TO BE CONFIRMED BY TOOLS AND AUTOMATION]</span></code></pre>
+  </li>
+  <li>Watch <code>ccmsetup.log</code> again. Return code 0 means success. Return code 7 means success with a restart required. Allow 10 to 20 minutes.</li>
+  <li>Wait up to 30 minutes for the client to register and download policy, then repeat the three checks in "Check the result". You do not need to run the Option 1 script afterwards.</li>
+</ol>
+<p>Notes:</p>
+<ul>
+  <li>The uninstall can clear the client's download cache, so content already downloaded will be fetched again.</li>
+  <li>Do not delete client folders or registry keys by hand. Use the uninstall command only.</li>
+</ul>
+
+<h2>Escalation</h2>
+<p>If the device is still not working after Option 2, raise a DSMS ticket to <span class="todo">[ASSIGNMENT GROUP TO BE CONFIRMED]</span> and include:</p>
+<ul>
+  <li>Device name and location.</li>
+  <li>Date and time each option was attempted.</li>
+  <li>The output line from the Option 1 script.</li>
+  <li>The symptoms still present.</li>
+  <li>Copies of these logs:
+    <ul>
+      <li><code>C:\Windows\CCM\Logs\PolicyAgent.log</code></li>
+      <li><code>C:\Windows\CCM\Logs\ClientIDManagerStartup.log</code></li>
+      <li><code>C:\Windows\CCM\Logs\LocationServices.log</code></li>
+      <li><code>C:\Windows\CCM\Logs\CcmMessaging.log</code></li>
+      <li><code>C:\Windows\ccmsetup\Logs\ccmsetup.log</code></li>
+    </ul>
+  </li>
+</ul>
+
+</body>
+</html>
