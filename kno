@@ -147,26 +147,34 @@ $results -join '; '</code></pre>
 <h2>Option 2: Reinstall the client</h2>
 <p>Use this when Option 1 fails, or when the device still cannot get software updates or communicate with the site an hour after a successful reset. A clean reinstall removes the client and everything it holds locally, then installs it fresh.</p>
 
-<h3>Route A: request a remote reinstall</h3>
-<p>This is the simpler route and needs nothing done on the device. Ask the MECM team to push a client reinstall, and give them the device name. The device must be powered on and connected to the network.</p>
+<h3>Before you start</h3>
+<p>The reinstall is run from the MECM console on COR TSP, so nothing needs to be run on the device itself. You need access to the console and rights to install clients. The device must be powered on and connected to the network.</p>
 
-<h3>Route B: reinstall locally</h3>
+<h3>Steps</h3>
 <ol>
-  <li>Open <strong>Windows PowerShell</strong> as administrator.</li>
-  <li>Uninstall the existing client:
-    <pre><code>C:\Windows\ccmsetup\ccmsetup.exe /uninstall</code></pre>
+  <li>Sign in to COR TSP and open the <strong>Configuration Manager console</strong>.</li>
+  <li>Go to <strong>Assets and Compliance</strong> &gt; <strong>Devices</strong>.</li>
+  <li>Type the device name in the search box and press Enter.</li>
+  <li>Confirm you have the right device. If the name appears more than once, choose the record with the most recent activity.</li>
+  <li>Right-click the device and select <strong>Install Client</strong>.</li>
+  <li>Select <strong>Next</strong> on the first page of the wizard.</li>
+  <li>On the <strong>Installation Options</strong> page, tick both of these:
+    <ul>
+      <li><strong>Always install the client software</strong></li>
+      <li><strong>Uninstall existing Configuration Manager client before the client is installed</strong></li>
+    </ul>
   </li>
-  <li>Wait for the uninstall to finish. Open <code>C:\Windows\ccmsetup\Logs\ccmsetup.log</code> and look for a final line reading <code>CcmSetup is exiting with return code 0</code>. This usually takes a few minutes.</li>
-  <li>Install the client using the approved command for your site:
-    <pre><code><span class="todo">[INSTALL COMMAND TO BE CONFIRMED BY TOOLS AND AUTOMATION]</span></code></pre>
-  </li>
-  <li>Watch <code>ccmsetup.log</code> again. Return code 0 means success. Return code 7 means success with a restart required. Allow 10 to 20 minutes.</li>
-  <li>Wait up to 30 minutes for the client to register and download policy, then repeat the three checks in "Check the result". You do not need to run the Option 1 script afterwards.</li>
+  <li>If asked, select <strong>Install the client software from a specified site</strong> and choose your site.</li>
+  <li>Select <strong>Next</strong>, <strong>Next</strong>, then <strong>Close</strong>.</li>
+  <li>Wait 20 to 30 minutes, then refresh the device in the console. A successful reinstall shows <strong>Client: Yes</strong>, <strong>Client Activity: Active</strong> and a current policy request time.</li>
+  <li>On the device, repeat the three checks in "Check the result". You do not need to run the Option 1 script afterwards.</li>
 </ol>
 <p>Notes:</p>
 <ul>
+  <li>The uninstall option is what clears the out-of-date policy. Without it, the client is repaired in place and the problem can remain.</li>
+  <li>If the uninstall option is not shown in the wizard, stop and escalate.</li>
   <li>The uninstall can clear the client's download cache, so content already downloaded will be fetched again.</li>
-  <li>Do not delete client folders or registry keys by hand. Use the uninstall command only.</li>
+  <li>If the device has not changed in the console after 60 minutes, escalate. The push may not have reached the device.</li>
 </ul>
 
 <h2>Escalation</h2>
