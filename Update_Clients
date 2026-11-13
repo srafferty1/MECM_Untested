@@ -1,0 +1,41 @@
+# Runs one client action and records whether it succeeded
+function Invoke-ClientAction {
+    param(
+        [string]$Name,
+        [string]$Method,
+        [hashtable]$Arguments
+    )
+
+    try {
+        $r = Invoke-CimMethod -Namespace 'root\ccm' -ClassName 'SMS_Client' `
+                              -MethodName $Method -Arguments $Arguments -ErrorAction Stop
+
+        if ($null -ne $r.ReturnValue -and $r.ReturnValue -ne 0) {
+            return "$Name=FAILED (return $($r.ReturnValue))"
+        }
+        return "$Name=OK"
+    }
+    catch {
+        return "$Name=FAILED ($($_.Exception.Message.Trim()))"
+    }
+}
+
+$results = @()
+
+# 1. Purge local policy
+$results += Invoke-ClientAction -Name 'Reset' -Method 'ResetPolicy' -Arguments @{ uFlags = [uint32]1 }
+Start-Sleep -Seconds 60
+
+# 2. Machine policy retrieval
+$results += Invoke-ClientAction -Name 'Policy' -Method 'TriggerSchedule' -Arguments @{ sScheduleID = '{00000000-0000-0000-0000-000000000021}' }
+Start-Sleep -Seconds 180
+
+# 3. Software updates scan
+$results += Invoke-ClientAction -Name 'Scan' -Method 'TriggerSchedule' -Arguments @{ sScheduleID = '{00000000-0000-0000-0000-000000000113}' }
+Start-Sleep -Seconds 120
+
+# 4. Software updates deployment evaluation
+$results += Invoke-ClientAction -Name 'Eval' -Method 'TriggerSchedule' -Arguments @{ sScheduleID = '{00000000-0000-0000-0000-000000000108}' }
+
+# One line of output per client
+$results -join '; '
